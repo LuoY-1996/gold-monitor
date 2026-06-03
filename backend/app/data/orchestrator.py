@@ -17,15 +17,15 @@ from app.data.geopolitics_fetcher import GeopoliticalRiskFetcher
 logger = logging.getLogger(__name__)
 
 
-async def _fetch_in_thread(fetcher, start_date, end_date):
-    """Run a blocking fetcher.fetch() in a thread pool to avoid blocking the event loop."""
-    return await asyncio.to_thread(fetcher.fetch, start_date, end_date)
+async def _fetch_one_task(fetcher, start_date, end_date):
+    """Run a single fetcher's async fetch method."""
+    return await fetcher.fetch(start_date, end_date)
 
 
 async def _fetch_one(fetcher, label: str, start_date, end_date) -> tuple[str, dict, object]:
     """Fetch data from one source in a thread, return (label, result_dict, (fetcher, df) or None)."""
     try:
-        df = await _fetch_in_thread(fetcher, start_date, end_date)
+        df = await _fetch_one_task(fetcher, start_date, end_date)
         if df is not None and not df.empty:
             return (label, {"status": "success", "records": len(df)}, (fetcher, df))
         else:
