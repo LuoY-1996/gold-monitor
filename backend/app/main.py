@@ -74,41 +74,15 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-async def root():
-    """Health check."""
-    return {"status": "ok", "service": "Gold Monitor API"}
-
-
 # Import and register API routers
 from app.api.v1.router import api_router
 app.include_router(api_router, prefix="/api/v1")
 
 
-# ── Serve React frontend (production only) ──
+# ── Serve React frontend in production ──
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
-    # Serve static assets (JS, CSS, images)
-    assets_dir = STATIC_DIR / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-    # Serve public files (logo, favicon, etc.)
-    for f in STATIC_DIR.glob("*"):
-        if f.is_file() and f.suffix != ".html":
-            fname = f.name
-            app.mount(f"/{fname}", StaticFiles(directory=str(STATIC_DIR), html=False), name=fname)
-
-    # SPA fallback — all non-API routes return index.html
-    @app.get("/{path:path}")
-    async def spa_fallback(path: str):
-        index_path = STATIC_DIR / "index.html"
-        if index_path.exists():
-            return FileResponse(str(index_path))
-        return {"message": "Frontend not built"}
-
-    @app.get("/")
-    async def root_spa():
-        return FileResponse(str(STATIC_DIR / "index.html"))
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 else:
     @app.get("/")
     async def root():
