@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
-from app.config import CORS_ORIGINS, HOST, PORT, FETCH_INTERVAL_MINUTES, BASE_DIR
+from app.config import CORS_ORIGINS, HOST, PORT, FETCH_INTERVAL_MINUTES, BASE_DIR, IS_SQLITE
 from app.database import init_db, async_session
 
 
@@ -34,12 +34,70 @@ async def periodic_fetch(interval_seconds: int = 300):
         await asyncio.sleep(interval_seconds)
 
 
+async def _run_fetcher(fetcher, session) -> dict:
+    """Run a single fetcher: fetch + save, return result summary."""
+    try:
+        df = await fetcher.fetch()
+        if df is not None and not df.empty:
+            count = await fetcher.save_to_db(df, session)
+            return {"status": "success", "records": count}
+        return {"status": "empty", "records": 0}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+
+async def _seed_historical_data(session):
+    """Load historical data on fresh PostgreSQL deployment."""
+    from app.data.orchestrator import (
+        fetch_historical_au9999,
+        fetch_historical_forex,
+        fetch_historical_treasury,
+    )
+    from app.data.fed_funds_fetcher import FedFundsFetcher
+    from app.data.gold_etf_fetcher import GoldEtfFetcher
+    from app.data.tips_fetcher import TipsBreakevenFetcher
+
+    tasks = [
+        ("Au99.99 历史数据", fetch_historical_au9999(session)),
+        ("USD/CNY 历史数据", fetch_historical_forex(session)),
+        ("美债10Y 历史数据", fetch_historical_treasury(session)),
+        ("联邦基金利率 历史数据", _run_fetcher(FedFundsFetcher(), session)),
+        ("黄金ETF持仓 历史数据", _run_fetcher(GoldEtfFetcher(), session)),
+        ("盈亏平衡通胀率 历史数据", _run_fetcher(TipsBreakevenFetcher(), session)),
+    ]
+
+    for label, task in tasks:
+        try:
+            result = await task
+            print(f"  [seed] {label}: {result.get('status')} ({result.get('records', 0)} 条)")
+        except Exception as e:
+            print(f"  [seed] {label} 失败: {e}")
+
+    print("[startup] Historical data seeding complete")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     # Startup: create tables
     await init_db()
     print("[startup] Database tables created")
+
+    # If PostgreSQL and database is fresh, auto-seed historical data
+    if not IS_SQLITE:
+        try:
+            async with async_session() as session:
+                from app.models.gold_price import GoldPriceAu9999
+                from sqlalchemy import select, func
+                result = await session.execute(select(func.count()).select_from(GoldPriceAu9999))
+                count = result.scalar()
+                if count == 0:
+                    print("[startup] Fresh PostgreSQL detected — loading historical data...")
+                    await _seed_historical_data(session)
+                else:
+                    print(f"[startup] PostgreSQL already has data ({count} Au99.99 records), skipping seed")
+        except Exception as e:
+            print(f"[startup] Seed check failed (non-fatal): {e}")
 
     # Start background periodic fetch task
     interval_seconds = FETCH_INTERVAL_MINUTES * 60

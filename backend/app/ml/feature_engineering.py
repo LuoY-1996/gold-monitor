@@ -311,10 +311,10 @@ async def build_training_dataset(
     # 4. Add derived features (lagged returns, volatility, ratios)
     df = _add_derived_features(df)
 
-    # 5. Add target variables
+    # 6. Add target variables
     df = _add_targets(df)
 
-    # 6. Clean up: drop rows without any target (last 7 rows), then rows with NaN features
+    # 7. Smart NaN handling — fill derived features instead of dropping them
     target_cols = [c for c in df.columns if c.startswith("target_")]
     if target_cols:
         df = df.dropna(subset=target_cols, how="all")
@@ -322,7 +322,24 @@ async def build_training_dataset(
     # Identify feature columns (exclude meta and target)
     feature_names = [c for c in df.columns if c not in META_COLS]
 
-    # Drop rows where any feature is NaN (first ~200 days due to MA200, etc.)
+    # Sort: numeric features first (for NaN handling), exclude date-like
+    numeric_feats = [c for c in feature_names if c not in ("trade_date",)]
+
+    # Fill NaN in derived features (ratios, long-MA, changes) instead of dropping rows.
+    # This preserves ~200 extra rows that would otherwise be lost to MA60/MA200 warm-up.
+    for col in numeric_feats:
+        nan_count = df[col].isna().sum()
+        if nan_count > 0:
+            # For time-series features (MA, ratios, etc.), backfill from the first valid
+            # value is more realistic than the global median — early NaN rows get the
+            # first actual value rather than a stationary midpoint.
+            df[col] = df[col].bfill().ffill()
+            # If still NaN (entire column), fall back to 0
+            df[col] = df[col].fillna(0.0)
+            if nan_count > 10:
+                logger.debug(f"[feat] Filled {nan_count} NaN in '{col}' (backfill)")
+
+    # Drop any remaining NaN rows (should be very few)
     df_clean = df.dropna(subset=feature_names)
 
     skipped = len(df) - len(df_clean)

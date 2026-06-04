@@ -9,9 +9,12 @@ const FACTOR_CONFIG: Record<string, { label: string; unit: string; color: string
   usd_cny: { label: '美元/人民币 (DXY 代理)', unit: '', color: '#1677ff', note: '与美元指数高度相关(~0.8)' },
   treasury_10y: { label: '美债10Years收益率', unit: '%', color: '#fa8c16', note: '实际利率核心指标' },
   vix: { label: 'VIX 恐慌指数', unit: '', color: '#722ed1', note: '市场避险情绪' },
+  fed_funds: { label: '联邦基金利率', unit: '%', color: '#cf1322', note: '美联储利率 = 持有黄金的机会成本' },
+  gold_etf: { label: '北美黄金ETF持仓', unit: '吨', color: '#13c2c2', note: 'World Gold Council 数据，GLD 占主导' },
+  breakeven_inflation: { label: '盈亏平衡通胀率', unit: '%', color: '#eb2f96', note: '10Y美债 - 10YTIPS = 市场通胀预期' },
 };
 
-const FACTOR_ORDER = ['oil', 'usd_cny', 'treasury_10y', 'vix'] as const;
+const FACTOR_ORDER = ['oil', 'usd_cny', 'treasury_10y', 'vix', 'fed_funds', 'gold_etf', 'breakeven_inflation'] as const;
 
 interface FactorPoint { trade_date: string; value: number; }
 
@@ -156,7 +159,7 @@ export default function FactorAnalysis() {
       // Load factor latest values + history
       const latest: Record<string, any> = {};
       const hist: Record<string, FactorPoint[]> = {};
-      for (const factor of ['oil', 'vix', 'usd_cny', 'treasury_10y'] as const) {
+      for (const factor of ['oil', 'vix', 'usd_cny', 'treasury_10y', 'fed_funds', 'gold_etf', 'breakeven_inflation'] as const) {
         try {
           const r = await fetchFactorHistory(factor, { limit: 365 });
           if (r.data.length > 0) {
@@ -291,6 +294,9 @@ export default function FactorAnalysis() {
                   usd_cny: { up: '国内金价 ↑', down: '人民币贬值→国内黄金自然上涨，与 DXY 高度相关(~0.8)' },
                   treasury_10y: { up: '金价 ↓', down: '利率↑→持有黄金机会成本↑，利空黄金。反之利率↓则利多' },
                   vix: { up: '金价 ↑', down: '恐慌↑→避险资金涌入黄金。VIX 飙升往往伴随金价跳涨' },
+                  fed_funds: { up: '金价 ↑（降息）', down: '降息→持有黄金机会成本↓→金价上涨。加息则相反，是最核心的定价因子' },
+                  gold_etf: { up: '金价 ↑', down: '持仓增加→机构看多→金价上涨动力增强。连续减持则是见顶信号（数据来自WGC）' },
+                  breakeven_inflation: { up: '金价 ↑', down: '通胀预期↑→黄金抗通胀需求↑→金价上涨。反之通胀预期↓则利空' },
                 };
                 return (
                   <Col xs={24} sm={12} key={key}>
@@ -299,7 +305,7 @@ export default function FactorAnalysis() {
                         <Col span={24}>
                           {val ? (
                             <Statistic title={cfg.label} value={val.value}
-                              precision={key === 'usd_cny' ? 4 : 2} suffix={cfg.unit}
+                              precision={key === 'usd_cny' ? 4 : key === 'gold_etf' ? 1 : 2} suffix={cfg.unit}
                               valueStyle={{ color: cfg.color, fontSize: 22 }} />
                           ) : (
                             <div style={{ color: '#999', fontSize: 12 }}>暂无数据</div>

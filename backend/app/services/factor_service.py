@@ -6,7 +6,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.factor import FactorVix, FactorUsdCny, FactorDxy, FactorTreasury10y, FactorCpi, FactorOil
+from app.models.factor import FactorVix, FactorUsdCny, FactorDxy, FactorTreasury10y, FactorCpi, FactorOil, FactorFedFunds, FactorGoldEtf, FactorBreakevenInflation
 from app.models.gold_price import GoldPriceXauUsd, GoldPriceAu9999
 
 FACTOR_MODEL_MAP = {
@@ -16,6 +16,9 @@ FACTOR_MODEL_MAP = {
     "treasury_10y": FactorTreasury10y,
     "cpi": FactorCpi,
     "oil": FactorOil,
+    "fed_funds": FactorFedFunds,
+    "gold_etf": FactorGoldEtf,
+    "breakeven_inflation": FactorBreakevenInflation,
 }
 
 GOLD_MODEL_MAP = {
@@ -43,13 +46,22 @@ async def get_factor_history(
     if end_date is None:
         end_date = date.today()
 
-    # Determine the date column
+    # Determine the date and value columns per factor type
     if factor_type == "cpi":
         date_col = model.report_date
         value_col = model.cpi_value
     elif factor_type == "treasury_10y":
         date_col = model.trade_date
         value_col = model.yield_value
+    elif factor_type == "fed_funds":
+        date_col = model.trade_date
+        value_col = model.rate
+    elif factor_type == "gold_etf":
+        date_col = model.trade_date
+        value_col = model.holdings_tons
+    elif factor_type == "breakeven_inflation":
+        date_col = model.trade_date
+        value_col = model.breakeven_rate
     else:
         date_col = model.trade_date
         value_col = model.close
@@ -106,6 +118,15 @@ async def compute_correlation(
         elif factor_type == "treasury_10y":
             date_col = model.trade_date
             value_col = model.yield_value
+        elif factor_type == "fed_funds":
+            date_col = model.trade_date
+            value_col = model.rate
+        elif factor_type == "gold_etf":
+            date_col = model.trade_date
+            value_col = model.holdings_tons
+        elif factor_type == "breakeven_inflation":
+            date_col = model.trade_date
+            value_col = model.breakeven_rate
         else:
             date_col = model.trade_date
             value_col = model.close
@@ -156,6 +177,9 @@ async def compute_correlation(
                 "oil": "布伦特原油",
                 "treasury_10y": "美债10Years收益率",
                 "cpi": "CPI 通胀",
+                "fed_funds": "联邦基金利率",
+                "gold_etf": "黄金ETF持仓",
+                "breakeven_inflation": "盈亏平衡通胀率",
             }.get(factor_type, factor_type),
             "pearson_correlation": round(float(pearson), 4),
             "rolling_corr_60d": latest_rolling,

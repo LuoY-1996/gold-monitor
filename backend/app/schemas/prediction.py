@@ -73,3 +73,5 @@ class ModelInfoResponse(BaseModel):
     feature_count: int | None = None
     top_features: list[FeatureImportanceItem] = []
     file_size_mb: float | None = None
+    cv_avg_accuracy: float | None = None
+    ensemble_types: list[str] | None = None

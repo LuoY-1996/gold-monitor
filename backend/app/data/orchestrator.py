@@ -4,6 +4,8 @@ import asyncio
 import logging
 from datetime import date
 
+from app.database import retry_on_lock
+
 from app.data.yfinance_fetcher import VixFetcher as VixRealtimeFetcher
 from app.data.yfinance_fetcher import OilFetcher as OilRealtimeFetcher
 from app.data.vix_fetcher import VixHistoryFetcher
@@ -13,6 +15,9 @@ from app.data.jinjia_fetcher import JinjiaDomesticFetcher, JinjiaInternationalFe
 from app.data.forex_fetcher import UsdCnyFetcher
 from app.data.macro_fetcher import Treasury10YFetcher, DxyProxyFetcher
 from app.data.geopolitics_fetcher import GeopoliticalRiskFetcher
+from app.data.fed_funds_fetcher import FedFundsFetcher
+from app.data.gold_etf_fetcher import GoldEtfFetcher
+from app.data.tips_fetcher import TipsBreakevenFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,10 @@ async def fetch_all_data(session, start_date: date | None = None, end_date: date
         # Historical depth (incremental — only inserts new dates)
         _fetch_one(VixHistoryFetcher(), "vix_history", None, None),
         _fetch_one(OilHistoryFetcher(), "oil_history", None, None),
+        # New factors
+        _fetch_one(FedFundsFetcher(), "fed_funds", start_date, end_date),
+        _fetch_one(GoldEtfFetcher(), "gold_etf", start_date, end_date),
+        _fetch_one(TipsBreakevenFetcher(), "breakeven_inflation", start_date, end_date),
     ]
 
     fetched = await asyncio.gather(*fetch_tasks)
@@ -66,7 +75,7 @@ async def fetch_all_data(session, start_date: date | None = None, end_date: date
         geo_fetcher = GeopoliticalRiskFetcher()
         geo_df = await geo_fetcher.fetch(session)
         if not geo_df.empty:
-            geo_count = await geo_fetcher.save_to_db(geo_df, session)
+            geo_count = await retry_on_lock(geo_fetcher.save_to_db, geo_df, session)
             results["geo_risk"] = {"status": "success", "records": geo_count}
             logger.info(f"[geo] risk score: {geo_df.iloc[0]['risk_score']:.2f}, "
                         f"intensity: {geo_df.iloc[0]['event_intensity']:.2f}")
@@ -84,7 +93,7 @@ async def fetch_all_data(session, start_date: date | None = None, end_date: date
 
         fetcher, df = payload
         try:
-            count = await fetcher.save_to_db(df, session)
+            count = await retry_on_lock(fetcher.save_to_db, df, session)
             result["records"] = count
             results[label] = result
             # Log the latest value
@@ -92,6 +101,12 @@ async def fetch_all_data(session, start_date: date | None = None, end_date: date
                 logger.info(f"[{label}] {count} records, last={df.iloc[-1]['yield_value']:.2f}%")
             elif label == "usd_cny":
                 logger.info(f"[{label}] {count} records, close={df.iloc[-1]['close']:.4f}")
+            elif label == "fed_funds":
+                logger.info(f"[{label}] {count} records, rate={df.iloc[-1]['rate']:.2f}%")
+            elif label == "breakeven_inflation":
+                logger.info(f"[{label}] {count} records, breakeven={df.iloc[-1]['breakeven_rate']:.2f}%")
+            elif label == "gold_etf":
+                logger.info(f"[{label}] {count} records, holdings={df.iloc[-1]['holdings_tons']:.1f}t")
             else:
                 logger.info(f"[{label}] {count} records, close={df.iloc[-1]['close']:.2f}")
         except Exception as save_err:
@@ -107,7 +122,7 @@ async def fetch_historical_treasury(session) -> dict:
         fetcher = Treasury10YFetcher()
         df = await fetcher.fetch()
         if not df.empty:
-            count = await fetcher.save_to_db(df, session)
+            count = await retry_on_lock(fetcher.save_to_db, df, session)
             logger.info(f"[macro] Treasury 10Y historical: {count} records loaded")
             return {"status": "success", "records": count}
         return {"status": "empty", "records": 0}
@@ -122,7 +137,7 @@ async def fetch_historical_forex(session) -> dict:
         fetcher = UsdCnyFetcher()
         df = await fetcher.fetch_history()
         if not df.empty:
-            count = await fetcher.save_to_db(df, session)
+            count = await retry_on_lock(fetcher.save_to_db, df, session)
             logger.info(f"[forex] USD/CNY historical: {count} records loaded")
             return {"status": "success", "records": count}
         return {"status": "empty", "records": 0}
@@ -137,7 +152,7 @@ async def fetch_historical_au9999(session) -> dict:
         fetcher = Au9999Fetcher()
         df = await fetcher.fetch()
         if not df.empty:
-            count = await fetcher.save_to_db(df, session)
+            count = await retry_on_lock(fetcher.save_to_db, df, session)
             logger.info(f"[akshare] Au99.99 historical: {count} records loaded")
             return {"status": "success", "records": count}
         return {"status": "empty", "records": 0}

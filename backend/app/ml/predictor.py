@@ -1,4 +1,8 @@
-"""Gold price prediction inference — multi-horizon with consensus voting."""
+"""Gold price prediction inference — multi-horizon ensemble with consensus voting.
+
+Supports both the new ensemble format (LightGBM + XGBoost + RandomForest)
+and legacy single-model format via auto-conversion in load_model().
+"""
 
 import logging
 from datetime import date
@@ -7,7 +11,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ml.model_trainer import load_model, HORIZONS
+from app.ml.model_trainer import load_model, HORIZONS, ensemble_predict_classify, ensemble_predict_regress
 from app.ml.feature_engineering import build_training_dataset, get_latest_features
 
 logger = logging.getLogger(__name__)
@@ -17,7 +21,7 @@ async def predict(
     session: AsyncSession,
     gold_type: str = "xau_usd",
 ) -> dict:
-    """Generate multi-horizon predictions with consensus voting.
+    """Generate multi-horizon predictions with ensemble consensus voting.
 
     Returns:
         dict with per-horizon predictions + consensus + signal strength
@@ -31,9 +35,16 @@ async def predict(
             "message": "No trained model found. Train first via POST /prediction/train",
         }
 
-    classifiers = model_pkg["classifiers"]
-    regressor = model_pkg["regressor"]
+    ensemble_classifiers = model_pkg.get("ensemble_classifiers", {})
+    ensemble_regressors = model_pkg.get("ensemble_regressors", {})
     feature_names = model_pkg["feature_names"]
+
+    if not ensemble_classifiers:
+        return {
+            "status": "error",
+            "gold_type": gold_type,
+            "message": "Model package has no ensemble classifiers",
+        }
 
     # 2. Build current features
     df, _ = await build_training_dataset(session, gold_type, days=365)
@@ -46,23 +57,27 @@ async def predict(
 
     X_current = latest[feature_names].values
 
-    # 3. Predict direction for each horizon
+    # 3. Predict direction for each horizon using ensemble
     horizon_predictions = {}
     votes_up = 0
     total_h = 0
 
     for h in HORIZONS:
-        if h not in classifiers:
+        if h not in ensemble_classifiers:
             continue
-        clf = classifiers[h]
-        direction = int(clf.predict(X_current)[0])
-        proba = clf.predict_proba(X_current)[0]
-        prob = float(proba[direction])
+        ensemble = ensemble_classifiers[h]
+        if not ensemble:
+            continue
+
+        direction, probs = ensemble_predict_classify(ensemble, X_current)
+        direction_val = int(direction[0])
+        prob_val = float(probs[0][direction_val])
+
         horizon_predictions[str(h)] = {
-            "direction": "up" if direction == 1 else "down",
-            "probability": round(prob, 4),
+            "direction": "up" if direction_val == 1 else "down",
+            "probability": round(prob_val, 4),
         }
-        if direction == 1:
+        if direction_val == 1:
             votes_up += 1
         total_h += 1
 
@@ -84,9 +99,9 @@ async def predict(
         consensus = "unknown"
         consensus_label = "数据不足"
 
-    # 5. 7d price regression
+    # 5. 7d price regression (ensemble)
     current_close = float(df.iloc[-1]["close"])
-    pred_return = float(regressor.predict(X_current)[0])
+    pred_return = float(ensemble_predict_regress(ensemble_regressors, X_current)[0])
     predicted_price = round(current_close * (1 + pred_return), 2)
 
     recent_vol = float(df["ret_1d"].tail(30).std())
@@ -94,19 +109,19 @@ async def predict(
     confidence_low = round(current_close * (1 + pred_return - ci_half), 2)
     confidence_high = round(current_close * (1 + pred_return + ci_half), 2)
 
-    # 6. Feature contributions
+    # 6. Feature contributions (use LightGBM from 7d ensemble if available)
+    feature_contributions = []
     try:
-        if 7 in classifiers:
-            imp = classifiers[7].feature_importances_
+        lgb_7d = ensemble_classifiers.get(7, {}).get("lgb")
+        if lgb_7d is not None:
+            imp = lgb_7d.feature_importances_
             top_idx = np.argsort(imp)[-5:][::-1]
             feature_contributions = [
                 {"feature": feature_names[i], "importance": round(float(imp[i]), 4)}
                 for i in top_idx
             ]
-        else:
-            feature_contributions = []
     except Exception:
-        feature_contributions = []
+        pass
 
     return {
         "status": "ok",
@@ -121,7 +136,7 @@ async def predict(
         "predicted_price_7d": predicted_price,
         "confidence_low": confidence_low,
         "confidence_high": confidence_high,
-        # New multi-horizon fields
+        # Multi-horizon fields
         "horizon_predictions": horizon_predictions,
         "consensus": consensus,
         "consensus_label": consensus_label,
