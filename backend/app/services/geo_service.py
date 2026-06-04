@@ -16,22 +16,8 @@ async def get_events(
     """Get geopolitical events within the last N months, optional category filter."""
     cutoff = date.today() - timedelta(days=months * 30)
 
-    # Debug: verify data exists
-    try:
-        total_check = await session.execute(text("SELECT COUNT(*) FROM geopolitical_events"))
-        total_count = total_check.scalar()
-        cutoff_check = await session.execute(
-            text("SELECT COUNT(*) FROM geopolitical_events WHERE event_date >= :c"),
-            {"c": cutoff},
-        )
-        cutoff_count = cutoff_check.scalar()
-        event_dates = await session.execute(text("SELECT MIN(event_date), MAX(event_date) FROM geopolitical_events"))
-        min_date, max_date = event_dates.one()
-        print(f"[geo] total={total_count} cutoff={cutoff} cutoff_count={cutoff_count} date_range={min_date}->{max_date}")
-    except Exception as e:
-        print(f"[geo] debug error: {e}")
-
-    # Use raw SQL to avoid ORM metadata caching issues
+    # Use raw SQL with string date to avoid type conversion issues
+    cutoff_str = cutoff.isoformat()
     if category:
         result = await session.execute(
             text("""
@@ -41,7 +27,7 @@ async def get_events(
                 WHERE event_date >= :cutoff AND category = :category
                 ORDER BY event_date DESC
             """),
-            {"cutoff": cutoff, "category": category},
+            {"cutoff": cutoff_str, "category": category},
         )
     else:
         result = await session.execute(
@@ -52,7 +38,7 @@ async def get_events(
                 WHERE event_date >= :cutoff
                 ORDER BY event_date DESC
             """),
-            {"cutoff": cutoff},
+            {"cutoff": cutoff_str},
         )
 
     rows = result.all()

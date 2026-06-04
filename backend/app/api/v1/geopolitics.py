@@ -65,6 +65,34 @@ async def get_geo_events(
     return [GeoEventResponse(**e) for e in events]
 
 
+@router.get("/events-debug")
+async def get_geo_events_debug(
+    months: int = Query(3, ge=1, le=24),
+    session: AsyncSession = DBSession,
+):
+    """Debug endpoint for geo events."""
+    from sqlalchemy import text
+    from datetime import date, timedelta
+    cutoff = date.today() - timedelta(days=months * 30)
+    results = {}
+    try:
+        r1 = await session.execute(text("SELECT COUNT(*) FROM geopolitical_events"))
+        results["total"] = r1.scalar()
+        r2 = await session.execute(text("SELECT COUNT(*) FROM geopolitical_events WHERE event_date >= :c"), {"c": cutoff})
+        results["matching_cutoff"] = r2.scalar()
+        r3 = await session.execute(text("SELECT MIN(event_date), MAX(event_date) FROM geopolitical_events"))
+        min_d, max_d = r3.one()
+        results["date_range"] = f"{min_d} -> {max_d}"
+        r4 = await session.execute(text("SELECT COUNT(*) FROM geopolitical_events LIMIT 5"))
+        results["sample_count"] = r4.scalar()
+    except Exception as e:
+        results["error"] = str(e)
+    results["today"] = str(date.today())
+    results["cutoff"] = str(cutoff)
+    results["months"] = months
+    return results
+
+
 @router.get("/risk", response_model=list[GeoRiskResponse])
 async def get_geo_risk(
     start_date: date | None = Query(None),
