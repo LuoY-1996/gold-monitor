@@ -2,7 +2,7 @@
 
 import json
 from datetime import date, timedelta
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.geopolitics import GeopoliticalEvent, GeopoliticalRiskIndex
@@ -15,21 +15,37 @@ async def get_events(
 ) -> list[dict]:
     """Get geopolitical events within the last N months, optional category filter."""
     cutoff = date.today() - timedelta(days=months * 30)
-    stmt = (
-        select(GeopoliticalEvent)
-        .where(GeopoliticalEvent.event_date >= cutoff)
-        .order_by(GeopoliticalEvent.event_date.desc())
-    )
-    if category:
-        stmt = stmt.where(GeopoliticalEvent.category == category)
 
-    result = await session.execute(stmt)
-    rows = result.scalars().all()
+    # Use raw SQL to avoid ORM metadata caching issues
+    if category:
+        result = await session.execute(
+            text("""
+                SELECT id, event_date, title, description, impact, direction,
+                       category, risk_regions, source_url
+                FROM geopolitical_events
+                WHERE event_date >= :cutoff AND category = :category
+                ORDER BY event_date DESC
+            """),
+            {"cutoff": cutoff, "category": category},
+        )
+    else:
+        result = await session.execute(
+            text("""
+                SELECT id, event_date, title, description, impact, direction,
+                       category, risk_regions, source_url
+                FROM geopolitical_events
+                WHERE event_date >= :cutoff
+                ORDER BY event_date DESC
+            """),
+            {"cutoff": cutoff},
+        )
+
+    rows = result.all()
 
     return [
         {
             "id": r.id,
-            "date": r.event_date.isoformat(),
+            "date": r.event_date.isoformat() if hasattr(r.event_date, 'isoformat') else str(r.event_date),
             "title": r.title,
             "description": r.description,
             "impact": r.impact,

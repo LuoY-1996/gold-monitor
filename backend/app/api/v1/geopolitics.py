@@ -65,45 +65,6 @@ async def get_geo_events(
     return [GeoEventResponse(**e) for e in events]
 
 
-@router.get("/events/debug")
-async def get_geo_events_debug(
-    months: int = Query(3, ge=1, le=24),
-    session: AsyncSession = DBSession,
-):
-    """Debug: compare ORM vs raw SQL."""
-    from datetime import date, timedelta
-    from sqlalchemy import text
-    from app.models.geopolitics import GeopoliticalEvent
-    import json
-
-    cutoff = date.today() - timedelta(days=months * 30)
-
-    # ORM query
-    from sqlalchemy import select
-    stmt = select(GeopoliticalEvent).where(GeopoliticalEvent.event_date >= cutoff)
-    orm_result = await session.execute(stmt)
-    orm_count = len(orm_result.scalars().all())
-
-    # Raw SQL query
-    raw_result = await session.execute(
-        text("SELECT COUNT(*) FROM geopolitical_events WHERE event_date >= :cutoff"),
-        {"cutoff": cutoff}
-    )
-    raw_count = raw_result.scalar()
-
-    # Total in table
-    total_result = await session.execute(text("SELECT COUNT(*) FROM geopolitical_events"))
-    total = total_result.scalar()
-
-    return {
-        "today": str(date.today()),
-        "cutoff": str(cutoff),
-        "orm_count": orm_count,
-        "raw_sql_count": raw_count,
-        "total_in_table": total,
-    }
-
-
 @router.get("/risk", response_model=list[GeoRiskResponse])
 async def get_geo_risk(
     start_date: date | None = Query(None),
