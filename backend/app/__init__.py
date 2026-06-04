@@ -1,1 +1,1 @@
-# Gold Monitor Backend
+# Gold Monitor Backend - FastAPI application
