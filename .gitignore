@@ -2,7 +2,6 @@ node_modules/
 __pycache__/
 *.pyc
 backend/gold_monitor.db
-backend/ml_models/
 backend/static/
 frontend/dist/
 .env
