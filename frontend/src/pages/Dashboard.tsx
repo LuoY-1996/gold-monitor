@@ -64,7 +64,11 @@ export default function Dashboard() {
       </Row>
 
       {/* Premium + Forex — side by side */}
-      {premium && premium.premium_pct !== null && (
+      {!premium && refreshing ? (
+          <Card style={{ marginBottom: 24 }}>
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          </Card>
+        ) : premium && premium.premium_pct !== null ? (
         <Row gutter={[24, 24]} style={{ marginBottom: 0 }}>
           <Col xs={24} lg={16}>
             <Card title="📊 国内外金价溢价分析" style={{ height: '100%' }}>

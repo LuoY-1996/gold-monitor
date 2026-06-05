@@ -23,8 +23,11 @@ async def get_valuation(session: AsyncSession = DBSession):
     geopolitical risk) to estimate gold's fair value at monthly frequency.
     Returns current valuation gap, percentile, and historical fair value series.
     """
-    result = await compute_valuation(session)
-    return result
+    try:
+        result = await compute_valuation(session)
+        return result
+    except Exception as e:
+        return {"status": "error", "message": f"Valuation compute failed: {str(e)}"}
 
 
 @router.get("/{gold_type}", response_model=PredictionResponse)
