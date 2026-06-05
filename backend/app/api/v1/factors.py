@@ -2,6 +2,7 @@
 
 from datetime import date
 from fastapi import APIRouter, Query
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
@@ -63,6 +64,43 @@ async def load_vix_history(session: AsyncSession = DBSession):
     count = await fetcher.save_to_db(df, session)
     date_range = f"{df.iloc[0]['date']} → {df.iloc[-1]['date']}"
     return {"status": "completed", "records": count, "date_range": date_range}
+
+
+FIX_TABLES = {
+    "factor_breakeven_inflation": {
+        "trade_date": "DATE",
+        "breakeven_rate": "DOUBLE PRECISION",
+        "treasury_10y": "DOUBLE PRECISION",
+        "tips_10y": "DOUBLE PRECISION",
+    },
+    "factor_gold_etf": {
+        "trade_date": "DATE",
+        "holdings_tons": "DOUBLE PRECISION",
+        "close_price": "DOUBLE PRECISION",
+    },
+    "geopolitical_events": {
+        "event_date": "DATE",
+        "impact": "INTEGER",
+        "direction": "INTEGER",
+    },
+}
+
+@router.post("/fix-types")
+async def fix_column_types(session: AsyncSession = DBSession):
+    """Fix TEXT columns to proper types (DATE/DOUBLE PRECISION/INTEGER)."""
+    results = []
+    for table, columns in FIX_TABLES.items():
+        for col, target_type in columns.items():
+            try:
+                await session.execute(text(
+                    f'ALTER TABLE "{table}" ALTER COLUMN "{col}" TYPE {target_type} USING "{col}"::{target_type}'
+                ))
+                await session.commit()
+                results.append(f"{table}.{col}: fixed to {target_type}")
+            except Exception as e:
+                err = str(e)[:120]
+                results.append(f"{table}.{col}: {err}")
+    return {"status": "completed", "fixes": results}
 
 
 @router.post("/load-oil-history")
