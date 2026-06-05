@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Spin } from 'antd';
 import { createChart, type IChartApi, type ISeriesApi, type LineData, LineSeries } from 'lightweight-charts';
 import type { GoldPricePoint } from '../../types/gold';
 import { GOLD_LABELS } from '../../utils/constants';
@@ -95,7 +96,7 @@ export default function PriceLineChart({ goldType, history, loading, height = 40
           borderRadius: 8,
         }}
       >
-        加载中...
+<Spin />
       </div>
     );
   }

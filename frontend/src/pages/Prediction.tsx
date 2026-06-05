@@ -73,6 +73,7 @@ export default function PredictionPage() {
   const [indicators, setIndicators] = useState<IndicatorDataPoint[]>([]);
   const [valuation, setValuation] = useState<ValuationResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -85,17 +86,19 @@ export default function PredictionPage() {
         }
       } catch { /* keep existing indicators */ }
 
-      // Load prediction (may fail if no model trained yet)
       try {
         const pred = await fetchPrediction(GOLD_TYPE);
         setPrediction(pred);
-      } catch { /* no model yet — OK */ }
+      } catch (e: any) {
+        if (e?.response?.status !== 404) {
+          setError('预测接口暂时不可用');
+        }
+      }
 
-      // Load model info
       try {
         const info = await fetchModelInfo(GOLD_TYPE);
         setModelInfo(info);
-      } catch { /* no model yet — OK */ }
+      } catch { /* no model info — OK */ }
 
     } finally {
       setLoading(false);
@@ -129,6 +132,9 @@ export default function PredictionPage() {
         message="模型说明"
         description="预测基于技术指标（MA/MACD/RSI/布林带）+ 宏观因素（美债10Y、USD/CNY、VIX、原油、地缘风险指数）。采用 LightGBM 多时间维度投票，时序分割训练（无未来信息泄露）。短期方向判断相对可靠，价格点位预测存在一定误差，仅供参考。"
       />
+
+      {/* Error alert */}
+      {error && <Alert type="error" message={error} closable onClose={() => setError(null)} style={{ marginBottom: 16 }} />}
 
       {/* Model info bar */}
       {modelInfo?.training_date && (
