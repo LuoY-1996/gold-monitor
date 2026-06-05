@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Row, Col, Card, Button, Statistic, Tag, Progress, Alert, Empty, Spin } from 'antd';
-import { ThunderboltOutlined, RiseOutlined } from '@ant-design/icons';
+import { Row, Col, Card, Statistic, Tag, Progress, Alert, Empty, Spin } from 'antd';
+import { ThunderboltOutlined } from '@ant-design/icons';
 import { fetchIndicators, type IndicatorDataPoint } from '../api/indicators';
-import { fetchPrediction, trainModel, fetchModelInfo, fetchValuation, type ValuationResult } from '../api/prediction';
-import type { PredictionResult, TrainingResult, ModelInfo } from '../types/prediction';
+import { fetchPrediction, fetchModelInfo, fetchValuation, type ValuationResult } from '../api/prediction';
+import type { PredictionResult, ModelInfo } from '../types/prediction';
 import { formatUSD } from '../utils/format';
 import PredictionChart from '../components/charts/PredictionChart';
 
@@ -69,8 +69,6 @@ function generateValuationAnalysis(v: ValuationResult): string {
 
 export default function PredictionPage() {
   const [prediction, setPrediction] = useState<PredictionResult | null>(null);
-  const [training, setTraining] = useState(false);
-  const [trainResult, setTrainResult] = useState<TrainingResult | null>(null);
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [indicators, setIndicators] = useState<IndicatorDataPoint[]>([]);
   const [valuation, setValuation] = useState<ValuationResult | null>(null);
@@ -113,23 +111,6 @@ export default function PredictionPage() {
     }).catch(() => {});
   }, []);
 
-  const handleTrain = async () => {
-    setTraining(true);
-    setTrainResult(null);
-    try {
-      const r = await trainModel(GOLD_TYPE, 2555);
-      setTrainResult(r);
-      // Reload prediction after training
-      if (r.status === 'success') {
-        await loadData();
-      }
-    } catch {
-      // Error handled by trainResult
-    } finally {
-      setTraining(false);
-    }
-  };
-
   return (
     <div>
       <h1 style={{ marginBottom: 24, fontSize: 24, fontWeight: 600 }}>
@@ -149,27 +130,25 @@ export default function PredictionPage() {
         description="预测基于技术指标（MA/MACD/RSI/布林带）+ 宏观因素（美债10Y、USD/CNY、VIX、原油、地缘风险指数）。采用 LightGBM 多时间维度投票，时序分割训练（无未来信息泄露）。短期方向判断相对可靠，价格点位预测存在一定误差，仅供参考。"
       />
 
-      {/* Controls */}
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Row gutter={16} align="middle">
-          <Col>
-            <Button type="primary" icon={<RiseOutlined />} onClick={handleTrain} loading={training}>
-              重新训练模型
-            </Button>
-          </Col>
-          {modelInfo?.training_date && (
+      {/* Model info bar */}
+      {modelInfo?.training_date && (
+        <Card size="small" style={{ marginBottom: 16 }}>
+          <Row gutter={16} align="middle">
             <Col>
-              <Tag color="blue">模型: {modelInfo.training_date}</Tag>
-              <Tag>{modelInfo.train_samples} 训练样本</Tag>
+              <Tag color="blue">训练日期: {modelInfo.training_date}</Tag>
+              <Tag>{modelInfo.train_samples} / {modelInfo.test_samples} 训练/测试样本</Tag>
               {modelInfo.dir_accuracy != null && (
                 <Tag color={modelInfo.dir_accuracy > 0.55 ? 'green' : 'orange'}>
-                  准确率: {(modelInfo.dir_accuracy * 100).toFixed(1)}%
+                  方向准确率: {(modelInfo.dir_accuracy * 100).toFixed(1)}%
                 </Tag>
               )}
+              {modelInfo.feature_count != null && (
+                <Tag>{modelInfo.feature_count} 个特征</Tag>
+              )}
             </Col>
-          )}
-        </Row>
-      </Card>
+          </Row>
+        </Card>
+      )}
 
       {/* ════════ AI 短期预测 + 宏观估值 — 左右排列 ════════ */}
       <Row gutter={[24, 24]}>
@@ -184,13 +163,9 @@ export default function PredictionPage() {
         )}
       >
         {!prediction && !loading ? (
-          <Empty description="尚未训练模型">
-            <Button type="primary" onClick={handleTrain} loading={training}>开始训练</Button>
-          </Empty>
+          <Empty description="预测数据加载中..." />
         ) : prediction?.status === 'no_model' ? (
-          <Empty description={prediction.message || '请先训练模型'}>
-            <Button type="primary" onClick={handleTrain} loading={training}>开始训练</Button>
-          </Empty>
+          <Empty description={prediction.message || '模型尚未训练，请联系管理员'} />
         ) : prediction?.status === 'ok' ? (
           <Row gutter={[24, 16]}>
             {/* Left: Chart */}
@@ -376,42 +351,6 @@ export default function PredictionPage() {
         )}
         </Col>
       </Row>
-
-      {/* Training Results */}
-      {trainResult && (
-        <Card title="📊 训练结果" size="small" style={{ marginTop: 16 }}>
-          {trainResult.status === 'conflict' ? (
-            <Alert type="warning" message={trainResult.message} />
-          ) : trainResult.status === 'error' ? (
-            <Alert type="error" message={trainResult.message} />
-          ) : (
-            <Row gutter={[24, 16]}>
-              <Col xs={12} sm={6}>
-                <Statistic title="方向准确率" value={trainResult.direction_accuracy != null ? (trainResult.direction_accuracy * 100).toFixed(1) + '%' : '-'} />
-              </Col>
-              <Col xs={12} sm={6}>
-                <Statistic title="F1 分数" value={trainResult.direction_f1 != null ? trainResult.direction_f1.toFixed(3) : '-'} />
-              </Col>
-              <Col xs={12} sm={6}>
-                <Statistic title="价格MAE" value={trainResult.price_mae_pct != null ? trainResult.price_mae_pct.toFixed(2) + '%' : '-'} />
-              </Col>
-              <Col xs={12} sm={6}>
-                <Statistic title="训练/测试" value={`${trainResult.train_samples || 0}/${trainResult.test_samples || 0}`} />
-              </Col>
-              {trainResult.feature_importance && trainResult.feature_importance.length > 0 && (
-                <Col span={24}>
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Top 10 特征重要性：</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {trainResult.feature_importance.map((f, i) => (
-                      <Tag key={i} color="purple">{f.feature}: {(f.importance * 100).toFixed(1)}%</Tag>
-                    ))}
-                  </div>
-                </Col>
-              )}
-            </Row>
-          )}
-        </Card>
-      )}
 
     </div>
   );
