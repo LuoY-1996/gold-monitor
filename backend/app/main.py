@@ -108,6 +108,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[startup] Seed check failed (non-fatal): {e}")
 
+        # Auto-seed empty data sources (gold_etf, breakeven_inflation, etc.)
+        from app.services.seed_missing import seed_missing_data_sources
+        try:
+            async with async_session() as session:
+                await seed_missing_data_sources(session)
+        except Exception as e:
+            print(f"[startup] Missing-data seed failed (non-fatal): {e}")
+
     # Start background periodic fetch task
     interval_seconds = FETCH_INTERVAL_MINUTES * 60
     fetch_task = asyncio.create_task(periodic_fetch(interval_seconds))
