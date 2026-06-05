@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse
 
 from app.config import CORS_ORIGINS, HOST, PORT, FETCH_INTERVAL_MINUTES, BASE_DIR, IS_SQLITE
@@ -145,10 +146,20 @@ from app.api.v1.router import api_router
 app.include_router(api_router, prefix="/api/v1")
 
 
-# ── Serve React frontend in production ──
+# ── Serve React frontend in production (SPA-aware) ──
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
-    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+    class _SPAStaticFiles(StaticFiles):
+        """Serve static files; for unmatched paths, serve index.html (SPA fallback)."""
+        async def get_response(self, path: str, scope):
+            try:
+                return await super().get_response(path, scope)
+            except StarletteHTTPException as ex:
+                if ex.status_code == 404:
+                    return FileResponse(self.directory / "index.html")
+                raise
+
+    app.mount("/", _SPAStaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 else:
     @app.get("/")
     async def root():
