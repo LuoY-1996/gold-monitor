@@ -6,9 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.config import CORS_ORIGINS, HOST, PORT, FETCH_INTERVAL_MINUTES, BASE_DIR, IS_SQLITE
 from app.database import init_db, async_session
@@ -154,20 +152,22 @@ from app.api.v1.router import api_router
 app.include_router(api_router, prefix="/api/v1")
 
 
-# ── Serve React frontend in production (SPA-aware) ──
+# ── Serve React frontend in production (SPA catch-all) ──
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
-    class _SPAStaticFiles(StaticFiles):
-        """Serve static files; for unmatched paths, serve index.html (SPA fallback)."""
-        async def get_response(self, path: str, scope):
-            try:
-                return await super().get_response(path, scope)
-            except StarletteHTTPException as ex:
-                if ex.status_code == 404:
-                    return FileResponse(self.directory / "index.html")
-                raise
+    from starlette.staticfiles import StaticFiles
+    if (STATIC_DIR / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
 
-    app.mount("/", _SPAStaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path and (STATIC_DIR / full_path).exists() and (STATIC_DIR / full_path).is_file():
+            return FileResponse(str(STATIC_DIR / full_path))
+        return FileResponse(str(STATIC_DIR / "index.html"))
+
+    @app.get("/")
+    async def serve_root_spa():
+        return FileResponse(str(STATIC_DIR / "index.html"))
 else:
     @app.get("/")
     async def root():
