@@ -1,14 +1,35 @@
-"""一站式迁移：本地 SQLite → Railway PostgreSQL"""
-import json
-import sqlite3
-from datetime import date
+"""一站式迁移：本地 SQLite → Railway PostgreSQL
 
-DB_PATH = r"D:\claude软件\金价监测\backend\gold_monitor.db"
-RAILWAY_DATABASE_URL = "postgresql://postgres:WtBVeKMnKkfaINQrknzedqqenWWKVSDC@acela.proxy.rlwy.net:13419/railway"
+Usage:
+  1. 从 Railway 仪表盘复制 PostgreSQL 连接字符串
+     https://railway.app/dashboard → PostgreSQL → Connect → Connection URL
+  2. 设置环境变量（任选一种）：
+     PowerShell: $env:DATABASE_URL=\"postgresql://user:pass@host:5432/railway\"
+     CMD:        set DATABASE_URL=postgresql://user:pass@host:5432/railway
+     Bash:       export DATABASE_URL=postgresql://user:pass@host:5432/railway
+  3. 运行: python scripts/migrate_to_railway.py
+"""
+import json
+import os
+import sqlite3
+import sys
+from datetime import date
+from pathlib import Path
+
+DB_PATH = Path(__file__).parent.parent / "gold_monitor.db"
+RAILWAY_DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+if not RAILWAY_DATABASE_URL:
+    print("[ERROR] 请设置 DATABASE_URL 环境变量指向你的 Railway PostgreSQL")
+    print("    set DATABASE_URL=postgresql://user:pass@host:5432/railway")
+    print("")
+    print("    提示: 旧密码已废弃，请去 Railway 仪表盘重新获取连接字符串:")
+    print("    https://railway.app/dashboard → PostgreSQL → Connect → Connection URL")
+    sys.exit(1)
 
 # ── Step 1: 从 SQLite 导出数据 ──
 print("=" * 60)
-print("📤 Step 1: 从本地 SQLite 导出数据")
+print("[Step 1] 从本地 SQLite 导出数据")
 print("=" * 60)
 
 conn = sqlite3.connect(DB_PATH)

@@ -81,7 +81,15 @@ async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     # Startup: create tables
     await init_db()
-    print("[startup] Database tables created")
+
+    # Log which database is connected
+    db_type = "PostgreSQL" if not IS_SQLITE else "SQLite"
+    print(f"[startup] Database: {db_type}")
+
+    if IS_SQLITE:
+        print("[startup] WARNING: Using SQLite — data is ephemeral on Railway!")
+    else:
+        print("[startup] Using PostgreSQL — data persisted")
 
     # If PostgreSQL and database is fresh, auto-seed historical data
     if not IS_SQLITE:

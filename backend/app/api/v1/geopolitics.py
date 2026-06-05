@@ -79,7 +79,7 @@ async def get_geo_events_debug(
     try:
         r1 = await session.execute(text("SELECT COUNT(*) FROM geopolitical_events"))
         results["total"] = r1.scalar()
-        r2 = await session.execute(text("SELECT COUNT(*) FROM geopolitical_events WHERE event_date >= :c"), {"c": cutoff.isoformat()})
+        r2 = await session.execute(text("SELECT COUNT(*) FROM geopolitical_events WHERE event_date >= :c"), {"c": cutoff})
         results["matching_cutoff"] = r2.scalar()
         r3 = await session.execute(text("SELECT MIN(event_date), MAX(event_date) FROM geopolitical_events"))
         min_d, max_d = r3.one()

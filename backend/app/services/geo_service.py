@@ -16,8 +16,6 @@ async def get_events(
     """Get geopolitical events within the last N months, optional category filter."""
     cutoff = date.today() - timedelta(days=months * 30)
 
-    # Use raw SQL with string date to avoid type conversion issues
-    cutoff_str = cutoff.isoformat()
     if category:
         result = await session.execute(
             text("""
@@ -27,7 +25,7 @@ async def get_events(
                 WHERE event_date >= :cutoff AND category = :category
                 ORDER BY event_date DESC
             """),
-            {"cutoff": cutoff_str, "category": category},
+            {"cutoff": cutoff, "category": category},
         )
     else:
         result = await session.execute(
@@ -38,7 +36,7 @@ async def get_events(
                 WHERE event_date >= :cutoff
                 ORDER BY event_date DESC
             """),
-            {"cutoff": cutoff_str},
+            {"cutoff": cutoff},
         )
 
     rows = result.all()
