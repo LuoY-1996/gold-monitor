@@ -117,7 +117,7 @@ export default function Dashboard() {
             </Card>
           </Col>
         </Row>
-      )}
+      ) : null}
 
     </div>
   );
