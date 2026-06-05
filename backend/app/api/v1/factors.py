@@ -42,6 +42,8 @@ async def get_factor_data(
         return FactorDataResponse(factor_type=factor_type, count=len(data), data=data)
     except ValueError as e:
         return {"status": "error", "message": str(e), "data": []}
+    except Exception as e:
+        return {"status": "error", "error_type": type(e).__name__, "message": str(e), "data": []}
 
 
 @router.post("/load-history")
