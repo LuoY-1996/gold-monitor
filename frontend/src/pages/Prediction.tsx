@@ -79,7 +79,7 @@ export default function PredictionPage() {
     try {
       // Load indicators for chart (always — even if model doesn't exist yet)
       try {
-        const indData = await fetchIndicators(GOLD_TYPE, 365);
+        const indData = await fetchIndicators(GOLD_TYPE, 30);
         if (indData?.data?.length > 0) {
           setIndicators(indData.data);
         }
