@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { createChart, type IChartApi, type ISeriesApi, type LineData } from 'lightweight-charts';
+import { createChart, type IChartApi, type ISeriesApi, type LineData, LineSeries } from 'lightweight-charts';
 import type { GoldPricePoint } from '../../types/gold';
 import { GOLD_LABELS } from '../../utils/constants';
 
@@ -51,8 +51,8 @@ export default function PriceLineChart({ goldType, history, loading, height = 40
       },
     });
 
-    // Add line series
-    const lineSeries = chart.addLineSeries({
+    // Add line series (lightweight-charts v5 API)
+    const lineSeries = chart.addSeries(LineSeries, {
       color: '#1677ff',
       lineWidth: 2,
       priceFormat: {
@@ -74,7 +74,7 @@ export default function PriceLineChart({ goldType, history, loading, height = 40
     chart.timeScale().fitContent();
 
     chartRef.current = chart;
-    lineSeriesRef.current = lineSeries;
+    lineSeriesRef.current = lineSeries as ISeriesApi<"Line">;
 
     // Cleanup on unmount
     return () => {
