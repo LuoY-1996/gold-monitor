@@ -87,9 +87,9 @@ async def lifespan(app: FastAPI):
     print(f"[startup] Database: {db_type}")
 
     if IS_SQLITE:
-        print("[startup] WARNING: Using SQLite — data is ephemeral on Railway!")
+        print("[startup] WARNING: Using SQLite on Railway — no PostgreSQL DATABASE_URL set!")
     else:
-        print("[startup] Using PostgreSQL — data persisted")
+        print("[startup] PostgreSQL connected — data persisted")
 
     # If PostgreSQL and database is fresh, auto-seed historical data
     if not IS_SQLITE:
