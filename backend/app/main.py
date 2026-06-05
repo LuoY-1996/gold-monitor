@@ -3,6 +3,7 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,29 +13,56 @@ from app.config import CORS_ORIGINS, HOST, PORT, FETCH_INTERVAL_MINUTES, BASE_DI
 from app.database import init_db, async_session
 
 
-async def periodic_fetch(interval_seconds: int = 300):
-    """Background task: periodically fetch latest gold prices."""
-    from app.data.orchestrator import fetch_all_data
+async def fetch_realtime_prices(interval_seconds: int = 3600):
+    """Background task: fetch only gold prices every hour."""
+    from app.data.orchestrator import fetch_realtime_prices as _fetch_prices
 
-    # Wait a bit for the server to fully start
-    await asyncio.sleep(5)
+    await asyncio.sleep(10)
 
     while True:
         try:
             async with async_session() as session:
-                results = await fetch_all_data(session)
-                # Log summary
+                results = await _fetch_prices(session)
                 xau = results.get("xau_usd", {})
                 au = results.get("au9999", {})
-                print(f"[auto-fetch] XAU: {xau.get('status')}, AU: {au.get('status')}")
+                print(f"[realtime] XAU: {xau.get('status')}, AU: {au.get('status')}")
         except Exception as e:
-            print(f"[auto-fetch] Error: {e}")
+            print(f"[realtime] Error: {e}")
 
         await asyncio.sleep(interval_seconds)
 
 
+async def fetch_daily_update():
+    """Background task: fetch all factors + retrain model at 8:00 AM Beijing (00:00 UTC)."""
+    from app.data.orchestrator import fetch_all_data
+    from app.ml.model_trainer import train_model
+
+    now = datetime.utcnow()
+    target = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if now >= target:
+        target += timedelta(days=1)
+    delay = (target - now).total_seconds()
+    print(f"[daily] First daily update in {delay/3600:.1f}h (next 8AM Beijing)")
+
+    await asyncio.sleep(delay)
+
+    while True:
+        try:
+            print(f"[daily] Starting daily update...")
+            async with async_session() as session:
+                results = await fetch_all_data(session)
+                ok = sum(1 for r in results.values() if r.get("status") == "success")
+                print(f"[daily] Factors: {ok}/{len(results)} sources updated")
+                train_result = await train_model(session, "xau_usd", 730)
+                acc = train_result.get("direction_accuracy", 0)
+                print(f"[daily] Model retrained, accuracy: {acc:.1%}")
+        except Exception as e:
+            print(f"[daily] Error: {e}")
+
+        await asyncio.sleep(24 * 3600)
+
+
 async def _run_fetcher(fetcher, session) -> dict:
-    """Run a single fetcher: fetch + save, return result summary."""
     try:
         df = await fetcher.fetch()
         if df is not None and not df.empty:
@@ -46,7 +74,6 @@ async def _run_fetcher(fetcher, session) -> dict:
 
 
 async def _seed_historical_data(session):
-    """Load historical data on fresh PostgreSQL deployment."""
     from app.data.orchestrator import (
         fetch_historical_au9999,
         fetch_historical_forex,
@@ -71,26 +98,15 @@ async def _seed_historical_data(session):
             print(f"  [seed] {label}: {result.get('status')} ({result.get('records', 0)} 条)")
         except Exception as e:
             print(f"  [seed] {label} 失败: {e}")
-
     print("[startup] Historical data seeding complete")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup/shutdown lifecycle."""
-    # Startup: create tables
     await init_db()
-
-    # Log which database is connected
     db_type = "PostgreSQL" if not IS_SQLITE else "SQLite"
     print(f"[startup] Database: {db_type}")
 
-    if IS_SQLITE:
-        print("[startup] WARNING: Using SQLite on Railway — no PostgreSQL DATABASE_URL set!")
-    else:
-        print("[startup] PostgreSQL connected — data persisted")
-
-    # If PostgreSQL and database is fresh, auto-seed historical data
     if not IS_SQLITE:
         try:
             async with async_session() as session:
@@ -99,14 +115,13 @@ async def lifespan(app: FastAPI):
                 result = await session.execute(select(func.count()).select_from(GoldPriceAu9999))
                 count = result.scalar()
                 if count == 0:
-                    print("[startup] Fresh PostgreSQL detected — loading historical data...")
+                    print("[startup] Fresh PostgreSQL detected -- loading historical data...")
                     await _seed_historical_data(session)
                 else:
                     print(f"[startup] PostgreSQL already has data ({count} Au99.99 records), skipping seed")
         except Exception as e:
             print(f"[startup] Seed check failed (non-fatal): {e}")
 
-        # Auto-seed empty data sources (gold_etf, breakeven_inflation, etc.)
         from app.services.seed_missing import seed_missing_data_sources
         try:
             async with async_session() as session:
@@ -114,17 +129,22 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[startup] Missing-data seed failed (non-fatal): {e}")
 
-    # Start background periodic fetch task
-    interval_seconds = FETCH_INTERVAL_MINUTES * 60
-    fetch_task = asyncio.create_task(periodic_fetch(interval_seconds))
-    print(f"[startup] Background auto-fetch started (every {FETCH_INTERVAL_MINUTES} min)")
+    # --- Background tasks ---
+    realtime_task = asyncio.create_task(fetch_realtime_prices(FETCH_INTERVAL_MINUTES * 60))
+    daily_task = asyncio.create_task(fetch_daily_update())
+    print(f"[startup] Realtime: every {FETCH_INTERVAL_MINUTES} min")
+    print(f"[startup] Daily: 8:00 AM Beijing (00:00 UTC)")
 
     yield
 
-    # Shutdown: cancel background task
-    fetch_task.cancel()
+    realtime_task.cancel()
+    daily_task.cancel()
     try:
-        await fetch_task
+        await realtime_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await daily_task
     except asyncio.CancelledError:
         pass
     print("[shutdown] Application stopped")
@@ -137,7 +157,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend dev server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -146,13 +165,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# Import and register API routers
 from app.api.v1.router import api_router
 app.include_router(api_router, prefix="/api/v1")
 
-
-# ── Serve React frontend in production (SPA catch-all) ──
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
     from starlette.staticfiles import StaticFiles
@@ -172,7 +187,6 @@ else:
     @app.get("/")
     async def root():
         return {"status": "ok", "service": "Gold Monitor API"}
-
 
 if __name__ == "__main__":
     import uvicorn

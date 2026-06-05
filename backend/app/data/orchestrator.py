@@ -116,6 +116,30 @@ async def fetch_all_data(session, start_date: date | None = None, end_date: date
     return results
 
 
+async def fetch_realtime_prices(session) -> dict:
+    """Fetch only real-time gold prices (XAU/USD + Au99.99)."""
+    results = {}
+    tasks = [
+        _fetch_one(JinjiaInternationalFetcher(), "xau_usd", None, None),
+        _fetch_one(JinjiaDomesticFetcher(), "au9999", None, None),
+    ]
+    fetched = await asyncio.gather(*tasks)
+
+    for label, result, payload in fetched:
+        if payload is None:
+            results[label] = result
+            continue
+        fetcher, df = payload
+        try:
+            count = await retry_on_lock(fetcher.save_to_db, df, session)
+            result["records"] = count
+            results[label] = result
+        except Exception as e:
+            results[label] = {"status": "save_failed", "error": str(e)}
+
+    return results
+
+
 async def fetch_historical_treasury(session) -> dict:
     """Load full US Treasury 10Y historical data (one-time, ~9000+ records)."""
     try:
