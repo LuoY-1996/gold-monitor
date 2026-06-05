@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useLayoutEffect } from 'react';
 import { Spin, Empty } from 'antd';
 import type { IndicatorDataPoint } from '../../api/indicators';
 import type { PredictionResult } from '../../types/prediction';
@@ -21,7 +21,7 @@ function drawChart(
   prediction: PredictionResult | null,
   height: number,
   formatPrice: (v: number) => string,
-) {
+): boolean {
   const w = container.clientWidth;
   if (w < 10) return false;
 
@@ -90,12 +90,10 @@ function drawChart(
     const forecastX = lastX + chartW * 0.08;
     const forecastY = toY(prediction.predicted_price_7d);
 
-    // Today marker
     ctx.strokeStyle = '#d9d9d9'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
     ctx.beginPath(); ctx.moveTo(lastX, pad.top); ctx.lineTo(lastX, H - pad.bottom); ctx.stroke();
     ctx.setLineDash([]);
 
-    // Confidence band
     if (prediction.confidence_low && prediction.confidence_high) {
       const lowY = toY(prediction.confidence_low);
       const highY = toY(prediction.confidence_high);
@@ -105,28 +103,22 @@ function drawChart(
       ctx.strokeRect(lastX, highY, forecastX - lastX, lowY - highY);
     }
 
-    // Forecast dashed line
     ctx.strokeStyle = '#52c41a'; ctx.lineWidth = 2.5; ctx.setLineDash([6, 3]);
     ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(forecastX, forecastY); ctx.stroke();
     ctx.setLineDash([]);
 
-    // Forecast dot
     ctx.fillStyle = '#52c41a'; ctx.beginPath();
     ctx.arc(forecastX, forecastY, 5, 0, Math.PI * 2); ctx.fill();
 
-    // Direction arrow
     const isUp = prediction.direction === 'up';
     ctx.fillStyle = isUp ? '#cf1322' : '#3f8600';
     ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left';
     const arrowLabel = `${isUp ? '↑' : '↓'} ${prediction.predicted_return_7d_pct}% (${(prediction.direction_probability! * 100).toFixed(0)}%)`;
     ctx.fillText(arrowLabel, forecastX + 10, forecastY);
-
-    // Price label
     ctx.font = '12px sans-serif'; ctx.fillStyle = '#52c41a';
     ctx.fillText(formatPrice(prediction.predicted_price_7d), forecastX + 10, forecastY + 18);
   }
 
-  // Labels
   ctx.fillStyle = '#999'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('← 历史', pad.left + 4, pad.top - 8);
   if (prediction?.predicted_price_7d) {
@@ -144,38 +136,42 @@ export default function PredictionChart({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawn, setDrawn] = useState(false);
 
-  const doDraw = useCallback(() => {
+  // useLayoutEffect fires synchronously after DOM mutations
+  // requestAnimationFrame ensures layout is computed before we measure clientWidth
+  useLayoutEffect(() => {
+    setDrawn(false);
+
     const container = containerRef.current;
     const canvas = canvasRef.current;
-    if (!container || !canvas || historicalData.length < 5) return false;
-    const ok = drawChart(canvas, container, historicalData, prediction, height, formatPrice);
-    if (ok) setDrawn(true);
-    return ok;
+    if (!container || !canvas || historicalData.length < 5) return;
+
+    // Wait for next frame so container has its final width
+    const rafId = requestAnimationFrame(() => {
+      const ok = drawChart(canvas, container, historicalData, prediction, height, formatPrice);
+      if (ok) setDrawn(true);
+    });
+
+    return () => cancelAnimationFrame(rafId);
   }, [historicalData, prediction, height, formatPrice]);
 
+  // Also listen for resize
   useEffect(() => {
-    setDrawn(false);
     const container = containerRef.current;
-    if (!container || historicalData.length < 5) return;
-
-    // Try immediate draw
-    if (doDraw()) return;
-
-    // Fallback: retry after layout settles
-    const timer = setTimeout(() => { doDraw(); }, 100);
-
-    // ResizeObserver: redraw when container resizes
-    let observer: ResizeObserver | null = null;
-    try {
-      observer = new ResizeObserver(() => { doDraw(); });
-      observer.observe(container);
-    } catch { /* ResizeObserver not supported */ }
-
-    return () => {
-      clearTimeout(timer);
-      if (observer) observer.disconnect();
+    if (!container) return;
+    let rafId: number;
+    const onResize = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ok = drawChart(canvas, container, historicalData, prediction, height, formatPrice);
+        if (ok) setDrawn(true);
+      });
     };
-  }, [doDraw]);
+    const observer = new ResizeObserver(onResize);
+    observer.observe(container);
+    return () => { observer.disconnect(); cancelAnimationFrame(rafId); };
+  }, [historicalData, prediction, height, formatPrice]);
 
   if (loading) {
     return (
@@ -196,7 +192,7 @@ export default function PredictionChart({
   return (
     <div ref={containerRef} style={{ width: '100%', position: 'relative' }}>
       <canvas ref={canvasRef} style={{ width: '100%', height, display: 'block' }} />
-      {!drawn && <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'absolute', top: 0, left: 0, right: 0 }}><Spin tip="绘制图表中..." /></div>}
+      {!drawn && <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin tip="正在绘制图表..." /></div>}
     </div>
   );
 }
